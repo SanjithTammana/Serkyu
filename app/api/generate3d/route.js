@@ -72,9 +72,7 @@ export async function POST(request) {
     });
   } catch (err) {
     console.error("Error in generate3d API:", err);
-    return NextResponse.json(
-      { error: "An error occurred while processing your request." },
-      { status: 500 }
-    );
+    const message = err?.message || "An error occurred while processing your request.";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

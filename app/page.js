@@ -33,8 +33,8 @@ import { mergeBufferGeometries } from 'three/examples/jsm/utils/BufferGeometryUt
 
 // Dynamic import of STLExporter (client only)
 const loadSTLExporter = async () => {
-  const module = await import('three/examples/jsm/exporters/STLExporter.js');
-  return module.STLExporter;
+  const mod = await import('three/examples/jsm/exporters/STLExporter.js');
+  return mod.STLExporter;
 };
 
 // Styled components (condensed from original)
@@ -346,7 +346,7 @@ const CompositeModel = ({ model }) => {
   );
 };
 
-const ThreeDViewport = React.memo(({ activeDesign }) => {
+const ThreeDViewport = React.memo(function ThreeDViewport({ activeDesign }) {
   return (
     <Canvas style={{ width: '100%', height: '100%', borderRadius: 12 }}>
       <ambientLight intensity={0.5} />
@@ -733,6 +733,38 @@ const SerkyuPage = () => {
     showSnackbar('Schematic exported successfully!');
   };
 
+  const handleGenerate3DFile = async () => {
+    handleExportClose();
+    if (!activeDesign) return;
+    try {
+      const promptText = activeDesign.messages
+        .map((m) => `${m.type === 'user' ? 'User' : 'Bot'}: ${m.content}`)
+        .join('\n');
+      const resp = await fetch('/api/generate3d', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: promptText }),
+      });
+      if (!resp.ok) throw new Error('Request failed');
+      const blob = await resp.blob();
+      const ext = resp.headers.get('content-type')?.includes('model/gltf-binary')
+        ? 'glb'
+        : 'bin';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${activeDesign.name}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showSnackbar('3D model generated!');
+    } catch (e) {
+      console.error(e);
+      showSnackbar('Failed to generate 3D model', 'error');
+    }
+  };
+
   if (isLanding) {
     return (
       <LandingContainer>
@@ -952,6 +984,9 @@ const SerkyuPage = () => {
                   </MenuItem>
                   <MenuItem onClick={handleExportSCH} disabled={!activeDesign}>
                     Export SCH
+                  </MenuItem>
+                  <MenuItem onClick={handleGenerate3DFile} disabled={!activeDesign}>
+                    Generate 3D File
                   </MenuItem>
                 </Menu>
               </Box>

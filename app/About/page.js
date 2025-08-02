@@ -127,7 +127,7 @@ const AboutPage = () => {
           machine-learning-powered tools that make complex technical concepts accessible 
           to everyone. We believe that technology should empower creativity and learning, 
           not create additional obstacles. By combining cutting-edge artificial intelligence 
-          with intuitive design, we're building solutions that adapt to each user's unique 
+          with intuitive design, we&apos;re building solutions that adapt to each user&apos;s unique
           learning style and pace. At the heart of our approach is human-centered support that complements our 
           technological capabilities. We understand that while AI can process information 
           and generate solutions at unprecedented speeds, the human element remains crucial 
@@ -139,7 +139,7 @@ const AboutPage = () => {
 
         {/* Emphatic Statement */}
         <EmphaticText>
-          Together, we're democratizing engineering education and fostering innovation.
+          Together, we&apos;re democratizing engineering education and fostering innovation.
         </EmphaticText>
 
         {/* Built By Section */}

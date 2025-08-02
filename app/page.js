@@ -220,7 +220,21 @@ const generate3DFromPrompt = async (prompt) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt }),
   });
-  if (!resp.ok) throw new Error('3D generation failed');
+  if (!resp.ok) {
+    let message = '3D generation failed';
+    try {
+      const data = await resp.json();
+      message = data?.error || message;
+    } catch (e) {
+      try {
+        const text = await resp.text();
+        if (text) message = text;
+      } catch (_) {
+        /* ignore */
+      }
+    }
+    throw new Error(message);
+  }
   const arrayBuffer = await resp.arrayBuffer();
   const blob = new Blob([arrayBuffer], {
     type: resp.headers.get('content-type') || 'application/octet-stream',
@@ -327,7 +341,7 @@ const SerkyuPage = () => {
       showSnackbar('Design created!');
     } catch (e) {
       console.error(e);
-      showSnackbar('Failed to generate model', 'error');
+      showSnackbar(e.message || 'Failed to generate model', 'error');
     } finally {
       setPrompt('');
       setIsGenerating(false);
@@ -372,7 +386,7 @@ const SerkyuPage = () => {
       showSnackbar('Response generated!');
     } catch (e) {
       console.error(e);
-      showSnackbar('Failed to get assistant response', 'error');
+      showSnackbar(e.message || 'Failed to get assistant response', 'error');
     } finally {
       setIsGenerating(false);
     }

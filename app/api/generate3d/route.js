@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 
 export async function POST(request) {
   try {
-    const { prompt } = await request.json();
+    // Accept a refined prompt from the chat endpoint
+    const { prompt: rawPrompt } = await request.json();
+    const prompt = rawPrompt?.trim();
 
     if (!prompt) {
       return NextResponse.json({ error: "Prompt is required" }, { status: 400 });

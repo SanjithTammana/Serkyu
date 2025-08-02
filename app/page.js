@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, Suspense } from 'react';
 import { styled } from '@mui/material/styles';
 import {
   Box,
@@ -27,14 +27,14 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import PersonIcon from '@mui/icons-material/Person';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Html } from '@react-three/drei';
+import { OrbitControls, Html, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
-import { mergeBufferGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils';
 
 // Dynamic import of STLExporter (client only)
 const loadSTLExporter = async () => {
-  const module = await import('three/examples/jsm/exporters/STLExporter.js');
-  return module.STLExporter;
+  const mod = await import('three/examples/jsm/exporters/STLExporter.js');
+  return mod.STLExporter;
 };
 
 // Styled components (condensed from original)
@@ -346,14 +346,31 @@ const CompositeModel = ({ model }) => {
   );
 };
 
-const ThreeDViewport = React.memo(({ activeDesign }) => {
+const GLTFModel = ({ url }) => {
+  const gltf = useGLTF(url);
+  return <primitive object={gltf.scene} />;
+};
+
+const ThreeDViewport = React.memo(function ThreeDViewport({ activeDesign }) {
   return (
     <Canvas style={{ width: '100%', height: '100%', borderRadius: 12 }}>
       <ambientLight intensity={0.5} />
       <directionalLight position={[5, 5, 5]} intensity={1} />
       <OrbitControls />
       {activeDesign ? (
-        activeDesign.model ? (
+        activeDesign.generatedUrl ? (
+          <Suspense
+            fallback={
+              <Html center>
+                <Typography variant="body1" color="white">
+                  Loading model...
+                </Typography>
+              </Html>
+            }
+          >
+            <GLTFModel url={activeDesign.generatedUrl} />
+          </Suspense>
+        ) : activeDesign.model ? (
           <CompositeModel model={activeDesign.model} />
         ) : (
           <Html center>
@@ -423,7 +440,7 @@ const pushToHistory = (design, newModel) => {
     color: '#8b8ac7',
   };
   past.push(current);
-  return { ...design, model: newModel, past, future: [] };
+  return { ...design, model: newModel, past, future: [], generatedUrl: null };
 };
 
 // Core interpret & refine
@@ -530,6 +547,7 @@ const SerkyuPage = () => {
       model: null,
       past: [],
       future: [],
+      generatedUrl: null,
       createdAt: new Date(),
     };
     setDesigns((prev) => [...prev, newDesign]);
@@ -716,7 +734,7 @@ const SerkyuPage = () => {
     let finalGeometry;
     if (mergedGeometries.length === 0) return;
     else if (mergedGeometries.length === 1) finalGeometry = mergedGeometries[0];
-    else finalGeometry = mergeBufferGeometries(mergedGeometries, true);
+    else finalGeometry = mergeGeometries(mergedGeometries, true);
 
     if (finalGeometry) finalGeometry.computeVertexNormals();
     const mergedMesh = new THREE.Mesh(finalGeometry, material);
@@ -731,6 +749,42 @@ const SerkyuPage = () => {
     if (!activeDesign) return;
     exportSCH(activeDesign, activeDesign.name);
     showSnackbar('Schematic exported successfully!');
+  };
+
+  const handleGenerate3DFile = async () => {
+    handleExportClose();
+    if (!activeDesign) return;
+    try {
+      const promptText = activeDesign.messages
+        .map((m) => `${m.type === 'user' ? 'User' : 'Bot'}: ${m.content}`)
+        .join('\n');
+      const resp = await fetch('/api/generate3d', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: promptText }),
+      });
+      if (!resp.ok) throw new Error('Request failed');
+      const blob = await resp.blob();
+      const ext = resp.headers.get('content-type')?.includes('model/gltf-binary')
+        ? 'glb'
+        : 'bin';
+      const url = URL.createObjectURL(blob);
+      setDesigns((prev) =>
+        prev.map((d) =>
+          d.id === activeDesignId ? { ...d, generatedUrl: url } : d
+        )
+      );
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${activeDesign.name}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showSnackbar('3D model generated!');
+    } catch (e) {
+      console.error(e);
+      showSnackbar('Failed to generate 3D model', 'error');
+    }
   };
 
   if (isLanding) {
@@ -952,6 +1006,9 @@ const SerkyuPage = () => {
                   </MenuItem>
                   <MenuItem onClick={handleExportSCH} disabled={!activeDesign}>
                     Export SCH
+                  </MenuItem>
+                  <MenuItem onClick={handleGenerate3DFile} disabled={!activeDesign}>
+                    Generate 3D File
                   </MenuItem>
                 </Menu>
               </Box>

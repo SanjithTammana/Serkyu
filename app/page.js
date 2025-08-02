@@ -29,7 +29,7 @@ import SmartToyIcon from '@mui/icons-material/SmartToy';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { mergeBufferGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 // Dynamic import of STLExporter (client only)
 const loadSTLExporter = async () => {
@@ -121,229 +121,27 @@ const DesignListItemStyled = styled(ListItemButton, { shouldForwardProp: (prop) 
 }));
 const NewDesignFab = styled(Fab)(() => ({ backgroundColor: '#9b9ddf', color: '#fff', '&:hover': { backgroundColor: '#8a8bc7' } }));
 
-// Modifier extraction
-const colorWordToHex = {
-  red: '#ff0000',
-  blue: '#0000ff',
-  orange: '#ffa500',
-  green: '#00ff00',
-  white: '#ffffff',
-  black: '#000000',
-};
-const extractModifiers = (text) => {
-  const lower = text.toLowerCase();
-  const color = Object.entries(colorWordToHex).find(([word]) => lower.includes(word))?.[1] || null;
-  let size = 1;
-  if (lower.includes('small')) size = 0.6;
-  if (lower.includes('large')) size = 1.5;
-  return { color, size };
-};
+// (legacy prompt helpers removed)
 
-// Few-shot examples
-const fewShotExamples = {
-  generic: [
-    {
-      request: 'a simple red cube',
-      spec: {
-        model: {
-          type: 'primitive',
-          primitive: 'box',
-          scale: 1,
-          color: '#ff0000',
-        },
-        explanation: 'red cube',
-      },
-    },
-  ],
-  cat: [
-    {
-      request: 'a red cat composed of simple shapes',
-      spec: {
-        model: {
-          type: 'composite',
-          components: [
-            { name: 'body', primitive: 'sphere', scale: 1.2, color: '#ff0000', offset: [0, 0, 0], rotation: [0, 0, 0] },
-            { name: 'head', primitive: 'sphere', scale: 0.8, color: '#ff0000', offset: [0, 1.3, 0], rotation: [0, 0, 0] },
-            { name: 'left_ear', primitive: 'cone', scale: 0.3, color: '#ff0000', offset: [-0.5, 1.8, 0], rotation: [0, 0, 0] },
-            { name: 'right_ear', primitive: 'cone', scale: 0.3, color: '#ff0000', offset: [0.5, 1.8, 0], rotation: [0, 0, 0] },
-            { name: 'leg_front_left', primitive: 'cylinder', scale: 0.4, color: '#ff0000', offset: [-0.4, -1.2, 0.5], rotation: [0, 0, 0] },
-            { name: 'leg_front_right', primitive: 'cylinder', scale: 0.4, color: '#ff0000', offset: [0.4, -1.2, 0.5], rotation: [0, 0, 0] },
-            { name: 'leg_back_left', primitive: 'cylinder', scale: 0.4, color: '#ff0000', offset: [-0.4, -1.2, -0.5], rotation: [0, 0, 0] },
-            { name: 'leg_back_right', primitive: 'cylinder', scale: 0.4, color: '#ff0000', offset: [0.4, -1.2, -0.5], rotation: [0, 0, 0] },
-            { name: 'tail', primitive: 'cylinder', scale: 0.2, color: '#ff0000', offset: [0, -0.3, -1.0], rotation: [1.2, 0, 0] },
-          ],
-        },
-        explanation: 'basic red cat made from primitives',
-      },
-    },
-  ],
-  elephant: [
-    {
-      request: 'a blue elephant with trunk and ears',
-      spec: {
-        model: {
-          type: 'composite',
-          components: [
-            { name: 'body', primitive: 'sphere', scale: 1.5, color: '#0000ff', offset: [0, 0, 0], rotation: [0, 0, 0] },
-            { name: 'head', primitive: 'sphere', scale: 1.0, color: '#0000ff', offset: [0, 1.7, 0], rotation: [0, 0, 0] },
-            { name: 'trunk', primitive: 'cylinder', scale: 0.4, color: '#0000ff', offset: [0, 0.8, 0.3], rotation: [1.2, 0, 0] },
-            { name: 'left_ear', primitive: 'sphere', scale: 0.8, color: '#0000ff', offset: [-1.2, 1.7, 0], rotation: [0, 0, 0] },
-            { name: 'right_ear', primitive: 'sphere', scale: 0.8, color: '#0000ff', offset: [1.2, 1.7, 0], rotation: [0, 0, 0] },
-            { name: 'leg_front_left', primitive: 'cylinder', scale: 0.5, color: '#0000ff', offset: [-0.6, -1.2, 0], rotation: [0, 0, 0] },
-            { name: 'leg_front_right', primitive: 'cylinder', scale: 0.5, color: '#0000ff', offset: [0.6, -1.2, 0], rotation: [0, 0, 0] },
-            { name: 'leg_back_left', primitive: 'cylinder', scale: 0.5, color: '#0000ff', offset: [-0.6, -1.2, -1], rotation: [0, 0, 0] },
-            { name: 'leg_back_right', primitive: 'cylinder', scale: 0.5, color: '#0000ff', offset: [0.6, -1.2, -1], rotation: [0, 0, 0] },
-          ],
-        },
-        explanation: 'blue elephant composed of head, trunk, ears, and legs',
-      },
-    },
-  ],
-};
-
-// Prompt builder that chooses examples by keyword presence
-const buildGeneralPrompt = (userText) => {
-  const lower = userText.toLowerCase();
-  let examples = fewShotExamples.generic;
-
-  if (lower.includes('cat')) examples = fewShotExamples.cat;
-  else if (lower.includes('elephant')) examples = fewShotExamples.elephant;
-
-  const exampleBlock = examples
-    .map(
-      (e) => `Request: "${e.request}"
-\`\`\`json
-${JSON.stringify(e.spec, null, 2)}
-\`\`\``
-    )
-    .join('\n\n');
-
-  // If asking for animal-like, add explicit decomposition instruction
-  const animalHint = lower.includes('cat') || lower.includes('elephant')
-    ? 'Because this is an animal, decompose it into logical parts (body, head, limbs, etc.) using simple primitives.'
-    : '';
-
-  return `
-Translate the following natural-language design request into a structured JSON specification using this schema:
-
-{
-  "model": {
-    "type": "primitive" | "composite",
-    "primitive": "sphere" | "box" | "cylinder" | "cone" | "torus" | "...",
-    "scale": number,
-    "color": "#rrggbb",
-    "components": [
-      {
-        "name": "string",
-        "primitive": "...",
-        "scale": number,
-        "color": "#rrggbb",
-        "offset": [x,y,z],
-        "rotation": [rx,ry,rz],
-        "relation": "optional",
-        "metadata": {}
-      }
-    ]
-  },
-  "explanation": "brief human-readable summary"
-}
-
-Respond with:
-1. A one-sentence acknowledgement.
-2. A single \`json\` code block containing only valid JSON following the schema (no extra prose).
-
-${animalHint}
-
-Here are examples to follow:
-${exampleBlock}
-
-Now translate this request: "${userText}"
-`;
-};
-
-// Extraction & validation of JSON block
-const extractStructuredSpec = (rawText) => {
+// Generic JSON extraction helper
+const extractJSON = (rawText) => {
   const match = rawText.match(/```json\s*([\s\S]*?)```/i);
   if (!match) return null;
   try {
     return JSON.parse(match[1]);
   } catch (e) {
-    console.warn('Failed to parse JSON spec:', e);
+    console.warn('Failed to parse JSON:', e);
     return null;
   }
 };
 
-const isValidSpec = (parsed) => {
-  if (!parsed || !parsed.model) return false;
-  const m = parsed.model;
-  if (m.type === 'primitive') {
-    if (!['sphere', 'box', 'cylinder', 'cone', 'torus'].includes(m.primitive)) return false;
-    if (typeof m.scale !== 'number') return false;
-    if (!/^#[0-9A-Fa-f]{6}$/.test(m.color)) return false;
-    return true;
-  }
-  if (m.type === 'composite') {
-    if (!Array.isArray(m.components)) return false;
-    return m.components.every((c) => {
-      if (!['sphere', 'box', 'cylinder', 'cone', 'torus'].includes(c.primitive)) return false;
-      if (typeof c.scale !== 'number') return false;
-      if (!/^#[0-9A-Fa-f]{6}$/.test(c.color)) return false;
-      if (!Array.isArray(c.offset) || c.offset.length !== 3) return false;
-      if (!Array.isArray(c.rotation) || c.rotation.length !== 3) return false;
-      return true;
-    });
-  }
-  return false;
-};
-
-// Mesh construction from spec
-const makeMesh = (primitive, scale, color, offset = [0, 0, 0], rotation = [0, 0, 0]) => {
-  let geometry;
-  if (primitive === 'sphere') geometry = new THREE.SphereGeometry(0.7, 32, 32);
-  else if (primitive === 'cylinder') geometry = new THREE.CylinderGeometry(0.5, 0.5, 1.5, 32);
-  else if (primitive === 'cone') geometry = new THREE.ConeGeometry(0.5, 1, 32);
-  else if (primitive === 'torus') geometry = new THREE.TorusGeometry(0.5, 0.2, 16, 100);
-  else geometry = new THREE.BoxGeometry(1, 1, 1);
-  const material = new THREE.MeshStandardMaterial({ color });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.scale.set(scale, scale, scale);
-  mesh.position.set(...offset);
-  mesh.rotation.set(...rotation);
-  return mesh;
-};
-
-const CompositeModel = ({ model }) => {
-  const groupRef = useRef();
+// Simple GLTF wrapper with rotation
+const GLTFModel = ({ model }) => {
+  const ref = useRef();
   useFrame((_, delta) => {
-    if (groupRef.current) groupRef.current.rotation.y += delta * 0.3;
+    if (ref.current) ref.current.rotation.y += delta * 0.3;
   });
-
-  if (!model) return null;
-
-  if (model.type === 'composite' && Array.isArray(model.components)) {
-    return (
-      <group ref={groupRef}>
-        {model.components.map((c, i) => (
-          <primitive
-            key={i}
-            object={makeMesh(
-              c.primitive,
-              c.scale,
-              c.color,
-              Array.isArray(c.offset) ? c.offset : [0, 0, 0],
-              Array.isArray(c.rotation) ? c.rotation : [0, 0, 0]
-            )}
-          />
-        ))}
-      </group>
-    );
-  }
-
-  return (
-    <group ref={groupRef}>
-      <primitive object={makeMesh(model.primitive || 'box', model.scale || 1, model.color || '#8b8ac7')} />
-    </group>
-  );
+  return model ? <primitive ref={ref} object={model} /> : null;
 };
 
 const ThreeDViewport = React.memo(function ThreeDViewport({ activeDesign }) {
@@ -354,7 +152,7 @@ const ThreeDViewport = React.memo(function ThreeDViewport({ activeDesign }) {
       <OrbitControls />
       {activeDesign ? (
         activeDesign.model ? (
-          <CompositeModel model={activeDesign.model} />
+          <GLTFModel model={activeDesign.model} />
         ) : (
           <Html center>
             <Typography variant="body1" color="white">
@@ -390,16 +188,10 @@ const exportSTL = async (scene, name = 'model') => {
 };
 
 const exportSCH = (design, name = 'design') => {
-  const spec = design.model || {
-    type: 'primitive',
-    primitive: 'box',
-    scale: 1,
-    color: '#8b8ac7',
-  };
   const schematic = {
     name: design.name,
     createdAt: design.createdAt,
-    model: spec,
+    refinedPrompt: design.refinedPrompt || '',
     recentMessages: design.messages.slice(-5),
   };
   const serialized = JSON.stringify(schematic, null, 2);
@@ -416,82 +208,55 @@ const exportSCH = (design, name = 'design') => {
 
 const pushToHistory = (design, newModel) => {
   const past = design.past ? [...design.past] : [];
-  const current = design.model || {
-    type: 'primitive',
-    primitive: 'box',
-    scale: 1,
-    color: '#8b8ac7',
-  };
+  const current = design.model || null;
   past.push(current);
   return { ...design, model: newModel, past, future: [] };
 };
 
-// Core interpret & refine
-const interpretAndRefine = async (userText, previousModel = null, history = []) => {
-  const modifiers = extractModifiers(userText);
-  let prompt = buildGeneralPrompt(userText);
+// Generate 3D model by refining prompt then calling backend generator
+const generate3DFromPrompt = async (prompt) => {
+  const resp = await fetch('/api/generate3d', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  });
+  if (!resp.ok) throw new Error('3D generation failed');
+  const arrayBuffer = await resp.arrayBuffer();
+  const blob = new Blob([arrayBuffer], {
+    type: resp.headers.get('content-type') || 'application/octet-stream',
+  });
+  const url = URL.createObjectURL(blob);
+  const loader = new GLTFLoader();
+  return await new Promise((resolve, reject) => {
+    loader.load(
+      url,
+      (gltf) => {
+        URL.revokeObjectURL(url);
+        resolve(gltf.scene);
+      },
+      undefined,
+      (err) => {
+        URL.revokeObjectURL(url);
+        reject(err);
+      }
+    );
+  });
+};
 
-  // initial call
+const refineAndGenerate = async (userText, history = []) => {
+  const refinementPrompt = `Refine the user's request into a concise prompt for a text-to-3D model.\nReturn a JSON block with keys: prompt, message.\nUser request: "${userText}"`;
+  const systemPrompt = `You are a helpful assistant that improves user requests for 3D generation. Respond only with a JSON block containing {"prompt": "refined prompt", "message": "short friendly reply"}.`;
   const resp = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: prompt, history, systemPrompt: null }),
+    body: JSON.stringify({ message: refinementPrompt, history, systemPrompt }),
   });
   const data = await resp.json();
-  const raw = data.response || data.responseMessage || '';
-  let structured = extractStructuredSpec(raw);
-  let model = previousModel || {
-    type: 'primitive',
-    primitive: 'box',
-    scale: modifiers.size || 1,
-    color: modifiers.color || '#8b8ac7',
-  };
-  let explanation = 'Interpreted design.';
-
-  if (structured && isValidSpec(structured)) {
-    model = structured.model;
-    explanation = structured.explanation || explanation;
-  }
-
-  if (modifiers.color) {
-    if (model.type === 'primitive') model.color = modifiers.color;
-    else if (model.type === 'composite') {
-      model.components = model.components.map((c) => ({ ...c, color: modifiers.color }));
-    }
-  }
-
-  if (modifiers.size && model.type === 'primitive' && (!('scale' in model) || model.scale === 1)) {
-    model.scale = modifiers.size;
-  }
-
-  // fallback refine if initial was invalid
-  if (!structured || !isValidSpec(structured)) {
-    const refinementPrompt = `
-Previous attempt to interpret: "${userText}" produced an invalid or incomplete spec.
-Please revise the JSON to comply exactly with the schema, correct any errors, and keep as close as possible to the user's intent.
-Return a single \`json\` block only.
-`;
-    const secondResp = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: refinementPrompt, history, systemPrompt: null }),
-    });
-    const secondData = await secondResp.json();
-    const secondRaw = secondData.response || secondData.responseMessage || '';
-    const secondStructured = extractStructuredSpec(secondRaw);
-    if (secondStructured && isValidSpec(secondStructured)) {
-      model = secondStructured.model;
-      explanation = secondStructured.explanation || explanation;
-      if (modifiers.color) {
-        if (model.type === 'primitive') model.color = modifiers.color;
-        else if (model.type === 'composite') {
-          model.components = model.components.map((c) => ({ ...c, color: modifiers.color }));
-        }
-      }
-    }
-  }
-
-  return { model, explanation };
+  const structured = extractJSON(data.response || data.responseMessage || '');
+  const refinedPrompt = structured?.prompt || userText;
+  const explanation = structured?.message || 'Generating model...';
+  const model = await generate3DFromPrompt(refinedPrompt);
+  return { model, explanation, refinedPrompt };
 };
 
 // Main page component
@@ -528,6 +293,7 @@ const SerkyuPage = () => {
           ]
         : [],
       model: null,
+      refinedPrompt: '',
       past: [],
       future: [],
       createdAt: new Date(),
@@ -543,7 +309,7 @@ const SerkyuPage = () => {
     const newDesign = createNewDesign(prompt);
     try {
       const history = [];
-      const { model: newModel, explanation } = await interpretAndRefine(prompt, null, history);
+      const { model: newModel, explanation, refinedPrompt } = await refineAndGenerate(prompt, history);
       const botMessage = {
         id: Date.now() + 1,
         type: 'bot',
@@ -553,7 +319,7 @@ const SerkyuPage = () => {
       setDesigns((prev) =>
         prev.map((d) =>
           d.id === newDesign.id
-            ? { ...d, messages: [...d.messages, botMessage], model: newModel }
+            ? { ...d, messages: [...d.messages, botMessage], model: newModel, refinedPrompt }
             : d
         )
       );
@@ -586,9 +352,8 @@ const SerkyuPage = () => {
         sender: m.type === 'user' ? 'user' : 'assistant',
         text: m.content,
       }));
-      const { model: newModel, explanation } = await interpretAndRefine(
+      const { model: newModel, explanation, refinedPrompt } = await refineAndGenerate(
         chatInput,
-        activeDesign?.model,
         history
       );
       const botMessage = {
@@ -601,7 +366,7 @@ const SerkyuPage = () => {
         prev.map((design) => {
           if (design.id !== activeDesignId) return design;
           const updated = pushToHistory(design, newModel);
-          return { ...updated, messages: [...design.messages, botMessage] };
+          return { ...updated, messages: [...design.messages, botMessage], refinedPrompt };
         })
       );
       showSnackbar('Response generated!');
@@ -670,57 +435,10 @@ const SerkyuPage = () => {
 
   const handleExportSTL = async () => {
     handleExportClose();
-    if (!activeDesign) return;
+    if (!activeDesign || !activeDesign.model) return;
 
     const scene = new THREE.Scene();
-    const spec = activeDesign.model || {
-      type: 'primitive',
-      primitive: 'box',
-      scale: 1,
-      color: '#8b8ac7',
-    };
-
-    const mergedGeometries = [];
-    let material = new THREE.MeshStandardMaterial({ color: '#8b8ac7' });
-
-    if (spec.type === 'composite' && Array.isArray(spec.components)) {
-      spec.components.forEach((c) => {
-        const prim = c.primitive || 'box';
-        const scale = typeof c.scale === 'number' ? c.scale : 1;
-        const color = c.color || '#8b8ac7';
-        const offset = Array.isArray(c.offset) ? c.offset : [0, 0, 0];
-        const rotation = Array.isArray(c.rotation) ? c.rotation : [0, 0, 0];
-        const mesh = makeMesh(prim, scale, color, offset, rotation);
-        mesh.updateMatrix();
-        if (mesh.geometry) {
-          const geomCopy = mesh.geometry.clone();
-          geomCopy.applyMatrix4(mesh.matrix);
-          mergedGeometries.push(geomCopy);
-        }
-        material = new THREE.MeshStandardMaterial({ color });
-      });
-    } else {
-      const prim = spec.primitive || 'box';
-      const scale = typeof spec.scale === 'number' ? spec.scale : 1;
-      const color = spec.color || '#8b8ac7';
-      const mesh = makeMesh(prim, scale, color);
-      mesh.updateMatrix();
-      if (mesh.geometry) {
-        const geomCopy = mesh.geometry.clone();
-        geomCopy.applyMatrix4(mesh.matrix);
-        mergedGeometries.push(geomCopy);
-      }
-      material = new THREE.MeshStandardMaterial({ color });
-    }
-
-    let finalGeometry;
-    if (mergedGeometries.length === 0) return;
-    else if (mergedGeometries.length === 1) finalGeometry = mergedGeometries[0];
-    else finalGeometry = mergeBufferGeometries(mergedGeometries, true);
-
-    if (finalGeometry) finalGeometry.computeVertexNormals();
-    const mergedMesh = new THREE.Mesh(finalGeometry, material);
-    scene.add(mergedMesh);
+    scene.add(activeDesign.model.clone());
 
     await exportSTL(scene, activeDesign.name);
     showSnackbar('STL exported successfully!');
@@ -737,9 +455,10 @@ const SerkyuPage = () => {
     handleExportClose();
     if (!activeDesign) return;
     try {
-      const promptText = activeDesign.messages
-        .map((m) => `${m.type === 'user' ? 'User' : 'Bot'}: ${m.content}`)
-        .join('\n');
+      const promptText = activeDesign.refinedPrompt ||
+        activeDesign.messages
+          .map((m) => `${m.type === 'user' ? 'User' : 'Bot'}: ${m.content}`)
+          .join('\n');
       const resp = await fetch('/api/generate3d', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
